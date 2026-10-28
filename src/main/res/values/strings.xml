@@ -401,7 +401,7 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="share_notifications_explanation">To see the progress when sending and receiving files you need to allow notifications</string>
     <string name="telepathy_permission_explanation">To read and write SMS from your desktop you need to give permission to SMS</string>
     <string name="telephony_permission_explanation">To see phone calls on the desktop you need to give permission to phone call logs and phone state</string>
-    <string name="telephony_optional_permission_explanation">To see a contact name instead of a phone number you need to give access to the phone\'s contacts</string>
+    <string name="telephony_optional_permission_explanation">To see a contact name instead of a phone number you need to give access to the phone\'s contacts. To answer, reject and hang up calls from the desktop you need to allow managing phone calls, and to see calls of the desktop you need to allow notifications</string>
     <string name="contacts_permission_explanation">To share your contacts book with the desktop, you need to give contacts permission</string>
     <string name="contacts_per_device_confirmation">Your phone contacts will be copied over to this device, so they can be used by the KDE Connect SMS app and other apps.</string>
 
@@ -671,4 +671,17 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="pref_mpris_volume_control_summary">Control the connected device\'s media volume using this phone\'s hardware buttons</string>
 
     <string name="pref_notification_screen_off_key" translatable="false">pref_notification_screen_off</string>
+
+    <string name="telephony_remote_call_incoming">Incoming call on %1$s</string>
+    <string name="telephony_remote_call_in_progress">Call in progress on %1$s</string>
+    <string name="telephony_unknown_caller">Unknown caller</string>
+    <string name="telephony_call_answer">Answer</string>
+    <string name="telephony_call_answer_here">Answer here</string>
+    <string name="telephony_call_reject">Reject</string>
+    <string name="telephony_call_hang_up">Hang up</string>
+    <string name="telephony_call_action_failed">Call action failed</string>
+    <string name="telephony_call_error_no_call">There is no call to act on</string>
+    <string name="telephony_call_error_permission">The device is not allowed to manage the call</string>
+    <string name="telephony_call_error_unsupported">The device does not support this action</string>
+    <string name="telephony_call_error_failed">The device could not perform the action</string>
 </resources>
