@@ -372,6 +372,9 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
             </intent-filter>
         </receiver>
 
+        <receiver android:name="org.kde.kdeconnect.plugins.receivenotifications.ReceiveNotificationsReceiver"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

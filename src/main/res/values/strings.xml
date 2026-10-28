@@ -634,6 +634,7 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="enable_bluetooth">Enable bluetooth (beta)</string>
 
     <string name="receive_notifications_permission_explanation">Notifications need to be allowed to receive them from other devices</string>
+    <string name="receive_notifications_reply">Reply</string>
     <string name="findmyphone_notifications_explanation">The notifications permission is needed so the phone can ring when the app is in the background</string>
     <string name="findmyphone_camera_explanation">Camera permission allows the flashlight to flash when finding your phone</string>
     <string name="findmyphone_open_settings_for_camera">Grant camera permission in app settings to use the flashlight</string>

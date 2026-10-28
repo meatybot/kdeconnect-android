@@ -26,6 +26,7 @@ import android.os.Message
 import android.service.notification.StatusBarNotification
 import android.text.TextUtils
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.createBitmap
 import androidx.fragment.app.DialogFragment
@@ -53,7 +54,8 @@ class NotificationsPlugin : Plugin(), NotificationReceiver.NotificationListener 
     private val notificationsIcons = HashMap<String, String>()
     private val postedNotifications = HashSet<String>()
     private val pendingIntents = HashMap<String, RepliableNotification>()
-    private val pendingActions = mutableMapOf<String, MutableList<Notification.Action>>()
+    @VisibleForTesting
+    internal val pendingActions = mutableMapOf<String, MutableList<Notification.Action>>()
     private var serviceReady = false
     private lateinit var keyguardManager: KeyguardManager
     private lateinit var mainHandler: Handler
@@ -503,6 +505,7 @@ class NotificationsPlugin : Plugin(), NotificationReceiver.NotificationListener 
 
     override fun onPacketReceived(np: NetworkPacket): Boolean {
         if (np.type == PACKET_TYPE_NOTIFICATION_ACTION) {
+            // Desktop peers may add "actionId", but we never send "actionIds", so the label identifies the action
             val key = np.getString("key")
             val title = np.getString("action")
             val intent = pendingActions[key]?.firstOrNull { it.title?.contentEquals(title) == true }?.actionIntent
