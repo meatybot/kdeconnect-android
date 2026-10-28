@@ -7,18 +7,24 @@ package org.kde.kdeconnect.plugins.telephony
 
 import android.Manifest
 import android.app.Activity
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import android.os.Build
 import android.telephony.PhoneNumberUtils
 import android.telephony.TelephonyManager
+import androidx.annotation.VisibleForTesting
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import org.kde.kdeconnect.NetworkPacket
 import org.kde.kdeconnect.helpers.ContactsHelper
+import org.kde.kdeconnect.helpers.NotificationHelper
 import org.kde.kdeconnect.plugins.Plugin
 import org.kde.kdeconnect.plugins.PluginFactory.LoadablePlugin
 import org.kde.kdeconnect.ui.PluginSettingsFragment
@@ -31,6 +37,17 @@ class TelephonyPlugin : Plugin() {
     private var lastState = TelephonyManager.CALL_STATE_IDLE
     private var lastPacket: NetworkPacket? = null
     private var isMuted = false
+
+    @VisibleForTesting
+    internal var callController: CallController? = null
+        get() = field ?: TelecomCallController(context).also { field = it }
+
+    // Speaker enabled by a request_action, to be restored when the call ends
+    private var speakerSetForCall = false
+
+    // Controller role, for calls on the peer's modem
+    private var remoteCallNumber: String? = null
+    private var remoteCallStreamId: String? = null
 
     private val receiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent) {
@@ -102,6 +119,10 @@ class TelephonyPlugin : Plugin() {
                 device.sendPacket(np)
             }
             TelephonyManager.CALL_STATE_IDLE -> {
+                if (speakerSetForCall) {
+                    callController?.setSpeakerphone(false)
+                    speakerSetForCall = false
+                }
                 val lastPacket = lastPacket ?: return
                 // Resend a cancel of the last event (can either be "ringing" or "talking")
                 lastPacket["isCancel"] = "true"
@@ -170,8 +191,112 @@ class TelephonyPlugin : Plugin() {
     override fun onPacketReceived(np: NetworkPacket): Boolean {
         when (np.type) {
             PACKET_TYPE_TELEPHONY_REQUEST_MUTE -> muteRinger()
+            CallHandoff.PACKET_TYPE_TELEPHONY_REQUEST_ACTION -> handleRequestAction(np)
+            CallHandoff.PACKET_TYPE_TELEPHONY_ACTION_STATUS -> handleActionStatus(np)
+            PACKET_TYPE_TELEPHONY -> handleRemoteCallEvent(np)
         }
         return true
+    }
+
+    private fun handleRequestAction(np: NetworkPacket) {
+        val request = CallHandoff.parseRequest(np)
+        val canStreamCallAudio = device.getPlugin(AUDIOSTREAM_PLUGIN_KEY) != null
+        val result = CallHandoff.execute(request, callController!!, canStreamCallAudio)
+        if (result.audioRoute == CallHandoff.AudioRoute.SPEAKER || result.audioRoute == CallHandoff.AudioRoute.REMOTE) {
+            speakerSetForCall = true
+        }
+        device.sendPacket(CallHandoff.statusPacket(request, result))
+    }
+
+    /**
+     * Asks the peer (a desktop with a ModemManager modem) to act on its call.
+     * Returns false if the peer does not support call actions.
+     */
+    fun sendCallAction(action: CallHandoff.Action, audioRoute: CallHandoff.AudioRoute? = null): Boolean {
+        if (!CallHandoff.peerAcceptsCallActions(device.deviceInfo.incomingCapabilities)) return false
+        device.sendPacket(CallHandoff.requestPacket(action, remoteCallNumber, audioRoute))
+        return true
+    }
+
+    private fun handleActionStatus(np: NetworkPacket) {
+        if (np.getBoolean("success")) {
+            if (remoteCallStreamId == null && CallHandoff.shouldRequestCallAudio(np, device.deviceInfo.incomingCapabilities)) {
+                val streamId = CallHandoff.newStreamId()
+                remoteCallStreamId = streamId
+                device.sendPacket(CallHandoff.audioStartPacket(streamId))
+            }
+            return
+        }
+        val reason = when (np.getString("error")) {
+            CallHandoff.ERROR_NO_CALL -> R.string.telephony_call_error_no_call
+            CallHandoff.ERROR_PERMISSION_DENIED -> R.string.telephony_call_error_permission
+            CallHandoff.ERROR_UNSUPPORTED -> R.string.telephony_call_error_unsupported
+            else -> R.string.telephony_call_error_failed
+        }
+        showRemoteCallNotification(context.getString(R.string.telephony_call_action_failed), context.getString(reason), emptyList(), false)
+    }
+
+    private fun handleRemoteCallEvent(np: NetworkPacket) {
+        if (np.getBoolean("isCancel")) {
+            remoteCallNumber = null
+            remoteCallStreamId?.let { device.sendPacket(CallHandoff.audioStopPacket(it)) }
+            remoteCallStreamId = null
+            NotificationManagerCompat.from(context).cancel(remoteCallNotificationId)
+            return
+        }
+        val event = np.getString("event")
+        if (event != "ringing" && event != "talking") return
+
+        remoteCallNumber = np.getStringOrNull("phoneNumber")
+        val caller = np.getStringOrNull("contactName") ?: remoteCallNumber ?: context.getString(R.string.telephony_unknown_caller)
+        val actionsSupported = CallHandoff.peerAcceptsCallActions(device.deviceInfo.incomingCapabilities)
+        val actions = mutableListOf<NotificationCompat.Action>()
+        if (actionsSupported && event == "ringing") {
+            actions += remoteCallAction(R.string.telephony_call_answer, CallHandoff.Action.ANSWER, CallHandoff.AudioRoute.DEFAULT)
+            if (CallHandoff.peerCanStreamAudio(device.deviceInfo.incomingCapabilities)) {
+                actions += remoteCallAction(R.string.telephony_call_answer_here, CallHandoff.Action.ANSWER, CallHandoff.AudioRoute.REMOTE)
+            }
+            actions += remoteCallAction(R.string.telephony_call_reject, CallHandoff.Action.REJECT, null)
+        } else if (actionsSupported) {
+            actions += remoteCallAction(R.string.telephony_call_hang_up, CallHandoff.Action.HANGUP, null)
+        }
+        val title = context.getString(
+            if (event == "ringing") R.string.telephony_remote_call_incoming else R.string.telephony_remote_call_in_progress,
+            device.name
+        )
+        showRemoteCallNotification(title, caller, actions, true)
+    }
+
+    private val remoteCallNotificationId: Int
+        get() = ("callhandoff" + device.deviceId).hashCode()
+
+    private fun remoteCallAction(label: Int, action: CallHandoff.Action, audioRoute: CallHandoff.AudioRoute?): NotificationCompat.Action {
+        val intent = Intent(context, TelephonyActionReceiver::class.java).apply {
+            this.action = TelephonyActionReceiver.ACTION_CALL
+            putExtra(TelephonyActionReceiver.EXTRA_DEVICE_ID, device.deviceId)
+            putExtra(TelephonyActionReceiver.EXTRA_CALL_ACTION, action.wire)
+            audioRoute?.let { putExtra(TelephonyActionReceiver.EXTRA_AUDIO_ROUTE, it.wire) }
+        }
+        val requestCode = (device.deviceId + action.wire + audioRoute?.wire).hashCode()
+        val pendingIntent = PendingIntent.getBroadcast(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        return NotificationCompat.Action.Builder(0, context.getString(label), pendingIntent).build()
+    }
+
+    private fun showRemoteCallNotification(title: String, text: String, actions: List<NotificationCompat.Action>, ongoing: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isPermissionGranted(Manifest.permission.POST_NOTIFICATIONS)) {
+            return
+        }
+        val builder = NotificationCompat.Builder(context, NotificationHelper.Channels.HIGHPRIORITY)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOngoing(ongoing)
+            .setAutoCancel(!ongoing)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+        actions.forEach { builder.addAction(it) }
+        @Suppress("MissingPermission") // Checked above
+        NotificationManagerCompat.from(context).notify(remoteCallNotificationId, builder.build())
     }
 
     private fun isNumberBlocked(number: String?): Boolean {
@@ -180,13 +305,27 @@ class TelephonyPlugin : Plugin() {
         return blockedNumbers.any { s -> PhoneNumberUtils.compare(number, s) }
     }
 
-    override val supportedPacketTypes: Array<String> = arrayOf(PACKET_TYPE_TELEPHONY_REQUEST_MUTE)
+    override val supportedPacketTypes: Array<String> = arrayOf(
+        PACKET_TYPE_TELEPHONY_REQUEST_MUTE,
+        CallHandoff.PACKET_TYPE_TELEPHONY_REQUEST_ACTION,
+        CallHandoff.PACKET_TYPE_TELEPHONY_ACTION_STATUS,
+        PACKET_TYPE_TELEPHONY,
+    )
 
-    override val outgoingPacketTypes: Array<String> = arrayOf(PACKET_TYPE_TELEPHONY)
+    override val outgoingPacketTypes: Array<String> = arrayOf(
+        PACKET_TYPE_TELEPHONY,
+        CallHandoff.PACKET_TYPE_TELEPHONY_REQUEST_ACTION,
+        CallHandoff.PACKET_TYPE_TELEPHONY_ACTION_STATUS,
+        CallHandoff.PACKET_TYPE_AUDIOSTREAM_REQUEST,
+    )
 
     override val requiredPermissions: Array<String> = arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG)
 
-    override val optionalPermissions: Array<String> = arrayOf(Manifest.permission.READ_CONTACTS)
+    override val optionalPermissions: Array<String> = buildList {
+        add(Manifest.permission.READ_CONTACTS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) add(Manifest.permission.ANSWER_PHONE_CALLS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+    }.toTypedArray()
 
     override fun hasSettings(): Boolean = true
 
@@ -219,5 +358,7 @@ class TelephonyPlugin : Plugin() {
         private const val PACKET_TYPE_TELEPHONY_REQUEST_MUTE = "kdeconnect.telephony.request_mute"
 
         private const val KEY_PREF_BLOCKED_NUMBERS = "telephony_blocked_numbers"
+
+        private const val AUDIOSTREAM_PLUGIN_KEY = "AudioStreamPlugin"
     }
 }
