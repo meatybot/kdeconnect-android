@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 meatybot <avatarcc@tuta.io>
+# SPDX-License-Identifier: CC0-1.0
+
+version = 1
+
+# Files added by the meatybot fork that cannot carry a header comment
+[[annotations]]
+path = ["RELEASING.md", "docs/specs/*.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 meatybot <avatarcc@tuta.io>"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+[[annotations]]
+path = ["src/test/resources/relay-test-vector.pem"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 meatybot <avatarcc@tuta.io>"
+SPDX-License-Identifier = "CC0-1.0"

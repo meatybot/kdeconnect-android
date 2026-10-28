@@ -34,6 +34,10 @@ It is a good idea to also subscribe to the [KDE Connect mailing list](https://ma
 Please know that all translations for all KDE apps are handled by the [localization team](https://l10n.kde.org/). If you would like to submit a translation, that should be done by working with the proper team for that language.
 
 ## License
-[GNU GPL v2](https://www.gnu.org/licenses/gpl-2.0.html) and [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.html)
+The code from upstream KDE Connect is licensed under the [GNU GPL v2](https://www.gnu.org/licenses/gpl-2.0.html) and [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.html), as stated in the header of each file.
 
-If you are reading this from GitHub, you should know that this is just a mirror of the [KDE Project repo](https://invent.kde.org/network/kdeconnect-android/).
+Files added by this fork are licensed under the [GNU AGPL v3 or later](https://www.gnu.org/licenses/agpl-3.0.html) (`SPDX-License-Identifier: AGPL-3.0-or-later`). GPLv3 section 13 allows combining them with the GPLv3 code, so the program built from this fork as a whole is distributed under the terms of the AGPL v3. Section 13 of the AGPL also applies: if you modify the program and let users interact with it over a network, you must offer them its source code.
+
+The `LICENSES` directory contains the full text of every license used.
+
+This repository is a fork of the [KDE Project repo](https://invent.kde.org/network/kdeconnect-android/) and is not affiliated with KDE.
