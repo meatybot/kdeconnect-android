@@ -1,7 +1,10 @@
 # KDE Connect relay and connect-by-key/fingerprint
 
-Status: implemented in kdeconnect-kde (`core/backends/relay`, `relayserver/`) and
-kdeconnect-android (`backends/relay`). This file is identical in both repositories.
+Status: implemented in kdeconnect-kde (`core/backends/relay`), kdeconnect-android
+(`backends/relay`) and the relay server
+[meatybot/kdeconnect-relayserver](https://github.com/meatybot/kdeconnect-relayserver). This file
+is identical in kdeconnect-kde and kdeconnect-android. The relay server repository documents the
+wire protocol on its own in `docs/protocol.md`.
 
 ## Goals
 
@@ -38,8 +41,8 @@ kdeconnect-android (`backends/relay`). This file is identical in both repositori
 - *Target*: what the user types: a relay key (20 base32 chars after normalization) or a
   fingerprint (64 hex chars after normalization). Anything else is rejected.
 
-Test vector (committed as `tests/data/relay-test-vector.pem` on desktop and
-`src/test/resources/relay-test-vector.pem` on Android, both test suites assert these values):
+Test vector (committed as `tests/data/relay-test-vector.pem` in kdeconnect-relayserver and
+`src/test/resources/relay-test-vector.pem` on Android, all three test suites assert these values):
 
 | Value | Result |
 |---|---|
@@ -314,9 +317,14 @@ Android (Settings, "Relay server" category):
 
 ## Relay server
 
-`relayserver/` builds `kdeconnect-relayserver` when `BUILD_RELAY_SERVER` (default `ON`). See
-`relayserver/README.md` for usage and `relayserver/kdeconnect-relayserver.service` for a systemd
-unit.
+The server lives in its own repository,
+[meatybot/kdeconnect-relayserver](https://github.com/meatybot/kdeconnect-relayserver), with release
+binaries, a container image (`ghcr.io/meatybot/kdeconnect-relayserver`) and a hosting guide
+(`docs/hosting.md`). kdeconnect-kde includes it as the git submodule
+`3rdparty/kdeconnect-relayserver`: the desktop client compiles the shared `src/relayprotocol.*`
+from it, and `tests/relaytest.cpp` runs the client against the real server code. The Android
+client has its own Kotlin implementation of the protocol, kept compatible by the shared test
+vector.
 
 ## Test plan
 
@@ -325,7 +333,7 @@ Desktop (`tests/relaytest.cpp`, run by `ctest` in CI):
 - Relay key and fingerprint of the shared test-vector certificate; determinism and uniqueness for
   freshly generated EC and RSA certificates; target parsing/normalization; line encode/decode
   limits.
-- In-process `RelayServer` (the same code as the daemon) on `127.0.0.1` with generated certificates: two clients register and get
+- In-process `RelayServer` (built from the kdeconnect-relayserver submodule) on `127.0.0.1` with generated certificates: two clients register and get
   their derived keys; connect by key and by fingerprint; end-to-end TLS through the tunnel with
   pinned certificates and data in both directions; `not_found`, `self`, wrong-certificate pin
   rejection (a third device attaching with the token), invalid token, `rate_limited`,
