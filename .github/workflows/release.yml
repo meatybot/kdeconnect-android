@@ -54,7 +54,8 @@ jobs:
       - name: Verify signature
         run: |
           apk=build/outputs/apk/release/kdeconnect-android-release.apk
-          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk"
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$apksigner" verify --print-certs "$apk"
           cp "$apk" "kdeconnect-android-$TAG.apk"
           sha256sum "kdeconnect-android-$TAG.apk" > "kdeconnect-android-$TAG.apk.sha256"
 
