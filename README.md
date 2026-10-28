@@ -19,6 +19,8 @@ This is a native Android port of the KDE Connect Qt app. You will find a more co
 
 You can install this app from the [Play Store](https://play.google.com/store/apps/details?id=org.kde.kdeconnect_tp) as well as [F-Droid](https://f-droid.org/repository/browse/?fdid=org.kde.kdeconnect_tp). Note you will also need to install the [desktop app](https://invent.kde.org/network/kdeconnect-kde) for it to work.
 
+This fork also publishes signed APKs on its GitHub releases page. See [RELEASING.md](RELEASING.md) for how to install and how releases are made.
+
 ## Contributing
 
 A lot of useful information, including how to get started working on KDE Connect and how to connect with the current developers, is on our [KDE Community Wiki page](https://community.kde.org/KDEConnect)
