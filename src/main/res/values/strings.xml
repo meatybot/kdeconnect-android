@@ -671,4 +671,23 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="pref_mpris_volume_control_summary">Control the connected device\'s media volume using this phone\'s hardware buttons</string>
 
     <string name="pref_notification_screen_off_key" translatable="false">pref_notification_screen_off</string>
+
+    <string name="pref_plugin_audiostream">Audio streaming</string>
+    <string name="pref_plugin_audiostream_desc">Stream media, system, call or microphone audio between devices</string>
+    <string name="audiostream_optional_permission_explanation">To send microphone or call audio you need to give access to the microphone</string>
+    <string name="audiostream_send">Send audio to device</string>
+    <string name="audiostream_receive">Play device audio here</string>
+    <string name="audiostream_stop_all">Stop audio streams</string>
+    <string name="audiostream_source_media">Media</string>
+    <string name="audiostream_source_system">System audio</string>
+    <string name="audiostream_source_call">Call (this phone\'s microphone only)</string>
+    <string name="audiostream_source_microphone">Microphone</string>
+    <string name="audiostream_consent_text">%1$s wants to receive your %2$s audio</string>
+    <string name="audiostream_allow">Allow</string>
+    <string name="audiostream_deny">Deny</string>
+    <string name="audiostream_notification_title">Audio streaming</string>
+    <string name="audiostream_sending">Sending %1$s audio to %2$s</string>
+    <string name="audiostream_playing">Playing %1$s audio from %2$s</string>
+    <string name="audiostream_error_busy">Too many audio streams</string>
+    <string name="audiostream_error_no_remote_sources">The device cannot send any audio</string>
 </resources>

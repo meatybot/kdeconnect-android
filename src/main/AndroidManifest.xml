@@ -71,6 +71,9 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
         android:icon="@mipmap/ic_launcher"
@@ -472,6 +475,21 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
                 <action android:name="android.service.controls.ControlsProviderService" />
             </intent-filter>
         </service>
+
+        <activity
+            android:name="org.kde.kdeconnect.plugins.audiostream.AudioStreamConsentActivity"
+            android:theme="@style/Theme.Transparent"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+
+        <service
+            android:name="org.kde.kdeconnect.plugins.audiostream.AudioStreamService"
+            android:foregroundServiceType="mediaProjection|microphone|mediaPlayback"
+            android:exported="false" />
+
+        <receiver
+            android:name="org.kde.kdeconnect.plugins.audiostream.AudioStreamActionReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

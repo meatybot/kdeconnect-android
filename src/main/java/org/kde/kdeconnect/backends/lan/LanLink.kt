@@ -240,6 +240,10 @@ class LanLink(
                     isDeviceTrusted = true,
                     clientMode = true
                 )
+                if (np.payloadSize == -1L) {
+                    // An endless payload (a live stream) can legitimately go quiet for a while
+                    payloadSocket.soTimeout = 0
+                }
                 np.payload = NetworkPacket.Payload(payloadSocket, np.payloadSize)
             } catch (e: Exception) {
                 payloadSocket.closeSafe()
