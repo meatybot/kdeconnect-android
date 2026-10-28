@@ -31,6 +31,7 @@ import org.kde.kdeconnect.backends.BaseLinkProvider
 import org.kde.kdeconnect.backends.BaseLinkProvider.ConnectionReceiver
 import org.kde.kdeconnect.backends.bluetooth.BluetoothLinkProvider
 import org.kde.kdeconnect.backends.lan.LanLinkProvider
+import org.kde.kdeconnect.backends.relay.RelayLinkProvider
 import org.kde.kdeconnect.helpers.NotificationHelper
 import org.kde.kdeconnect.plugins.clipboard.ClipboardFloatingActivity
 import org.kde.kdeconnect.plugins.clipboard.ClipboardPlugin
@@ -66,6 +67,7 @@ class BackgroundService : Service() {
 
     private fun registerLinkProviders() {
         linkProviders.add(LanLinkProvider(this))
+        linkProviders.add(RelayLinkProvider(this))
         //linkProviders.add(LoopbackLinkProvider(this))
         linkProviders.add(BluetoothLinkProvider(this))
     }
@@ -80,6 +82,9 @@ class BackgroundService : Service() {
             linkProvider.onNetworkChange(network)
         }
     }
+
+    val relayLinkProvider: RelayLinkProvider?
+        get() = linkProviders.firstNotNullOfOrNull { it as? RelayLinkProvider }
 
     fun addConnectionListener(connectionReceiver: ConnectionReceiver) {
         for (linkProvider in linkProviders) {
