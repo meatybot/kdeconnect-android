@@ -80,6 +80,15 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // Release signing for CI: only configured when the keystore is provided through the environment
+        System.getenv("KDECONNECT_RELEASE_KEYSTORE")?.let { keystore ->
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("KDECONNECT_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KDECONNECT_RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("KDECONNECT_RELEASE_KEY_PASSWORD") ?: storePassword
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -92,6 +101,7 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     lint {
