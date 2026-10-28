@@ -702,4 +702,23 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="telephony_call_error_permission">The device is not allowed to manage the call</string>
     <string name="telephony_call_error_unsupported">The device does not support this action</string>
     <string name="telephony_call_error_failed">The device could not perform the action</string>
+    <string name="relay_settings_title">Relay server</string>
+    <string name="relay_enable">Use a relay server</string>
+    <string name="relay_enable_desc">Reach devices on other networks through a relay server you trust to forward encrypted traffic</string>
+    <string name="relay_server_address">Relay server address</string>
+    <string name="relay_server_address_hint">host:port</string>
+    <string name="relay_server_address_invalid">Invalid relay server address</string>
+    <string name="relay_server_not_set">Not set</string>
+    <string name="relay_own_key">Your relay key</string>
+    <string name="relay_own_key_summary">%1$s (%2$s). Tap to copy</string>
+    <string name="relay_key_copied">Relay key copied</string>
+    <string name="relay_status_disabled">not in use</string>
+    <string name="relay_status_connecting">connecting</string>
+    <string name="relay_status_registered">connected</string>
+    <string name="relay_status_offline">unreachable, retrying</string>
+    <string name="relay_connect_to_device">Connect by key or fingerprint</string>
+    <string name="relay_connect_to_device_desc">Enter the relay key or certificate fingerprint of a device on this network or on the same relay</string>
+    <string name="relay_connect_to_device_hint">Relay key or fingerprint</string>
+    <string name="relay_connect_requested">Pairing will be requested once the device is reachable. Compare the verification key on both devices.</string>
+    <string name="relay_connect_invalid">Not a valid relay key or certificate fingerprint</string>
 </resources>

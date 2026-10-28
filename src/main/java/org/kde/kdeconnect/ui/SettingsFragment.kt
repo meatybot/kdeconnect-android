@@ -6,6 +6,8 @@
 package org.kde.kdeconnect.ui
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -25,9 +27,11 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
+import androidx.core.content.getSystemService
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
+import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreference
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -36,12 +40,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.kde.kdeconnect.BackgroundService
+import org.kde.kdeconnect.KdeConnect
+import org.kde.kdeconnect.backends.relay.RelayConnection
+import org.kde.kdeconnect.backends.relay.RelayLinkProvider
+import org.kde.kdeconnect.backends.relay.RelayProtocol
 import org.kde.kdeconnect.extensions.setupBottomPadding
 import org.kde.kdeconnect.helpers.CreateFileParams
 import org.kde.kdeconnect.helpers.CreateFileResultContract
 import org.kde.kdeconnect.helpers.DeviceHelper
 import org.kde.kdeconnect.helpers.DeviceHelper.getDeviceName
 import org.kde.kdeconnect.helpers.NotificationHelper
+import org.kde.kdeconnect.helpers.security.SslHelper
 import org.kde.kdeconnect.ui.ThemeUtil.applyTheme
 import org.kde.kdeconnect_tp.BuildConfig
 import org.kde.kdeconnect_tp.R
@@ -66,11 +75,21 @@ class SettingsFragment : PreferenceFragmentCompat() {
             trustedNetworkPref(context),
             devicesByIpPref(context),
             bluetoothSupportPref(context),
+            relayCategory(context),
             exportLogsPref(context),
             moreSettingsPref(context),
         ).forEach(screen::addPreference)
 
         preferenceScreen = screen
+        listOf(
+            relayEnabledPref(context),
+            relayServerPref(context),
+            relayKeyPref(context),
+            relayConnectPref(context),
+        ).forEach(relayCategory::addPreference)
+        relayKeyPref.dependency = RelayLinkProvider.KEY_RELAY_ENABLED
+        relayServerPref.dependency = RelayLinkProvider.KEY_RELAY_ENABLED
+        BackgroundService.instance?.relayLinkProvider?.status?.observe(this) { updateRelayKeySummary() }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -237,6 +256,91 @@ class SettingsFragment : PreferenceFragmentCompat() {
             // Restarts the BluetoothLinkProvider. The preference is saved before the service handles this.
             BackgroundService.ForceRefreshConnections(context)
             true
+        }
+    }
+
+    private lateinit var relayCategory: PreferenceCategory
+    private lateinit var relayKeyPref: Preference
+    private lateinit var relayServerPref: EditTextPreference
+
+    private fun relayCategory(context: Context) = PreferenceCategory(context).apply {
+        relayCategory = this
+        isPersistent = false
+        setTitle(R.string.relay_settings_title)
+    }
+
+    private fun relayEnabledPref(context: Context) = SwitchPreference(context).apply {
+        setDefaultValue(false)
+        key = RelayLinkProvider.KEY_RELAY_ENABLED
+        setTitle(R.string.relay_enable)
+        setSummary(R.string.relay_enable_desc)
+    }
+
+    private fun relayServerPref(context: Context) = EditTextPreference(context).apply {
+        relayServerPref = this
+        key = RelayLinkProvider.KEY_RELAY_SERVER
+        setTitle(R.string.relay_server_address)
+        setDialogTitle(R.string.relay_server_address)
+        setOnBindEditTextListener { editText: EditText ->
+            editText.setSingleLine()
+            editText.setHint(R.string.relay_server_address_hint)
+        }
+        summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
+            pref.text?.takeIf { it.isNotBlank() } ?: getString(R.string.relay_server_not_set)
+        }
+        onPreferenceChangeListener = Preference.OnPreferenceChangeListener { _: Preference?, new: Any? ->
+            val address = (new as String?).orEmpty()
+            if (address.isNotBlank() && RelayProtocol.parseAddress(address) == null) {
+                view?.let { Snackbar.make(it, R.string.relay_server_address_invalid, Snackbar.LENGTH_LONG).show() }
+                false
+            } else {
+                true
+            }
+        }
+    }
+
+    private fun relayKeyPref(context: Context) = Preference(context).apply {
+        relayKeyPref = this
+        isPersistent = false
+        setTitle(R.string.relay_own_key)
+        onPreferenceClickListener = Preference.OnPreferenceClickListener {
+            val clipboard = context.getSystemService<ClipboardManager>()
+            clipboard?.setPrimaryClip(ClipData.newPlainText(getString(R.string.relay_own_key), RelayProtocol.relayKey(SslHelper.certificate)))
+            view?.let { Snackbar.make(it, R.string.relay_key_copied, Snackbar.LENGTH_SHORT).show() }
+            true
+        }
+        updateRelayKeySummary()
+    }
+
+    private fun updateRelayKeySummary() {
+        val status = BackgroundService.instance?.relayLinkProvider?.status?.value ?: RelayConnection.Status.Disabled
+        val statusText = getString(
+            when (status) {
+                RelayConnection.Status.Disabled -> R.string.relay_status_disabled
+                RelayConnection.Status.Connecting -> R.string.relay_status_connecting
+                RelayConnection.Status.Registered -> R.string.relay_status_registered
+                RelayConnection.Status.Offline -> R.string.relay_status_offline
+            }
+        )
+        relayKeyPref.summary = getString(R.string.relay_own_key_summary, RelayProtocol.relayKey(SslHelper.certificate), statusText)
+    }
+
+    private fun relayConnectPref(context: Context) = EditTextPreference(context).apply {
+        isPersistent = false
+        setTitle(R.string.relay_connect_to_device)
+        setSummary(R.string.relay_connect_to_device_desc)
+        setDialogTitle(R.string.relay_connect_to_device)
+        setOnBindEditTextListener { editText: EditText ->
+            editText.setSingleLine()
+            editText.setText("")
+            editText.setHint(R.string.relay_connect_to_device_hint)
+        }
+        onPreferenceChangeListener = Preference.OnPreferenceChangeListener { _: Preference?, new: Any? ->
+            val accepted = KdeConnect.getInstance().connectToDevice((new as String?).orEmpty())
+            view?.let {
+                Snackbar.make(it, if (accepted) R.string.relay_connect_requested else R.string.relay_connect_invalid, Snackbar.LENGTH_LONG).show()
+            }
+            false // Nothing to persist
         }
     }
 

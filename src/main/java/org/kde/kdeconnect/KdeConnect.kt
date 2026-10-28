@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 import org.kde.kdeconnect.PairingHandler.PairingCallback
 import org.kde.kdeconnect.backends.BaseLink
 import org.kde.kdeconnect.backends.BaseLinkProvider.ConnectionReceiver
+import org.kde.kdeconnect.backends.relay.ConnectTargets
+import org.kde.kdeconnect.backends.relay.RelayProtocol
 import org.kde.kdeconnect.helpers.DeviceHelper
 import org.kde.kdeconnect.helpers.LifecycleHelper
 import org.kde.kdeconnect.helpers.NotificationHelper
@@ -47,6 +49,9 @@ class KdeConnect : Application() {
     }
 
     val devices: ConcurrentHashMap<String, Device> = ConcurrentHashMap()
+
+    /** Devices the user asked to connect to by relay key or fingerprint, see [connectToDevice] */
+    private val connectTargets = ConnectTargets()
 
     private val deviceListChangedCallbacks = ConcurrentHashMap<String, DeviceListChangedCallback>()
 
@@ -193,6 +198,10 @@ class KdeConnect : Application() {
                 devices[link.deviceId] = device
                 device.addPairingCallback(devicePairingCallback)
             }
+            if (connectTargets.take(link.deviceInfo.certificate) && device.pairStatus == PairingHandler.PairState.NotPaired) {
+                Log.i("KdeConnect", "Requested device ${link.deviceId} connected via ${link.name}, requesting pairing")
+                device.requestPairing()
+            }
             onDeviceListChanged()
         }
 
@@ -223,6 +232,30 @@ class KdeConnect : Application() {
                 onDeviceListChanged()
             }
         }
+    }
+
+    /**
+     * Connects to and requests pairing with the device with this relay key or certificate fingerprint,
+     * on the LAN or through the relay. Returns false if the input is not a valid key or fingerprint.
+     */
+    fun connectToDevice(input: String): Boolean {
+        val target = RelayProtocol.parseTarget(input) ?: return false
+        if (target.matches(SslHelper.certificate)) {
+            return false
+        }
+        val connected = devices.values.firstOrNull { it.isReachable && target.matches(it.certificate) }
+        if (connected != null) {
+            if (connected.pairStatus == PairingHandler.PairState.NotPaired) {
+                connected.requestPairing()
+            }
+            return true
+        }
+        connectTargets.add(target)
+        BackgroundService.instance?.let { service ->
+            service.onNetworkChange(null) // LAN rediscovery, picked up in onConnectionReceived()
+            service.relayLinkProvider?.connectTo(target)
+        }
+        return true
     }
 
     fun scheduleForDeletion(device: Device) {
