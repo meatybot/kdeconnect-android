@@ -15,6 +15,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -144,6 +145,14 @@ class AudioStreamPlugin : Plugin() {
         override fun dismissConsent(streamId: String) {
             context.getSystemService<NotificationManager>()?.cancel(consentNotificationId(streamId))
         }
+
+        override fun startApprovedCapture(streamId: String, source: String, format: StreamFormat) {
+            // Call audio only: it comes from the microphone and needs no MediaProjection
+            if (!controller.consentGranted(streamId)) return
+            AudioStreamService.startApprovedCapture(context, device.deviceId, streamId)
+        }
+
+        override fun nowMs(): Long = SystemClock.elapsedRealtime()
 
         override fun startPlayback(streamId: String, start: Message, payload: NetworkPacket.Payload): AudioStreamController.StreamHandle? {
             val input = payload.inputStream ?: return null

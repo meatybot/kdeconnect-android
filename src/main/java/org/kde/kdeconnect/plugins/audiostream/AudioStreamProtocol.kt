@@ -40,6 +40,8 @@ object AudioStreamProtocol {
     const val ERROR_PLAYBACK_FAILED = "playback_failed"
     const val ERROR_TIMEOUT = "timeout"
     const val ERROR_INVALID_REQUEST = "invalid_request"
+    /** The system mutes the capture, for example during a phone call */
+    const val ERROR_SILENCED = "silenced"
 
     const val CALL_AUDIO_LOCAL_MICROPHONE_ONLY = "local_microphone_only"
 

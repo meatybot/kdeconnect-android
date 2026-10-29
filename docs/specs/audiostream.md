@@ -156,6 +156,7 @@ up):
 | `permission_denied` | the local user or the OS refused (consent dialog, runtime permission, confirmation prompt) |
 | `busy` | `maxStreams` reached or `streamId` already in use |
 | `capture_failed` | the capture device could not be opened or failed while streaming |
+| `silenced` | the sender's OS mutes the capture, for example Android during a cellular call; the receiver should tell the user rather than end silently |
 | `playback_failed` | the receiver could not open an output device |
 | `timeout` | a request was not answered in time |
 | `invalid_request` | malformed packet (missing/invalid field) |
@@ -330,7 +331,11 @@ sound server (each gets its own output stream).
     user always sees a notification while a stream is being sent.
   - Android: every remote capture request needs a tap on a notification, followed by the OS
     consent (runtime microphone permission and/or the MediaProjection dialog). Android shows its
-    own capture indicators.
+    own capture indicators. One exception: when the user answers a call from the peer with
+    `audioRoute: "remote"` (see `callhandoff.md`), that answer is the consent for the one `call`
+    request that follows within 30 s. The approval is single-use and is cleared when the call
+    ends. If Android refuses to start the capture from the background, the normal consent
+    notification is shown instead.
 - An ongoing outgoing stream is always visible (desktop notification, Android foreground
   service notification) and can be stopped from there.
 - Resource limits: `maxStreams` per device, frames above 64 KiB rejected, bounded sender queue
@@ -354,6 +359,13 @@ sound server (each gets its own output stream).
   sources may drift if they are on different sound cards; PulseAudio then drops or pads.
 - Capturing the monitor while also playing a stream from the same peer creates a feedback loop;
   this is the user's choice and is not prevented.
+- Remote requests for `microphone` and `call` wait for the local user to press Allow on a
+  notification. Inside the Flatpak, KNotification sends it through the desktop portal
+  (`org.freedesktop.portal.Notification`), so a portal backend that implements notifications
+  must be running (Plasma, GNOME and most desktops have one). Without it nothing is shown and
+  the request is denied after 30 s. Verified in a test session: without a notification backend
+  the request stayed `awaitingConfirmation`; with `xdg-desktop-portal-gtk` the prompt appeared
+  and pressing Allow started the stream.
 - Windows/macOS: not built (no capture backend implemented).
 
 ### Android
@@ -361,24 +373,41 @@ sound server (each gets its own output stream).
 - `media`/`system` need Android 10 (API 29): `AudioPlaybackCaptureConfiguration` with a
   MediaProjection, which requires the user to accept the system screen/audio capture dialog for
   every stream (on Android 14+ the token is single-use) and a foreground service of type
-  `mediaProjection`. `media` captures `USAGE_MEDIA`; `system` captures `USAGE_MEDIA`,
+  `mediaProjection`. On Android 14+ the dialog is opened with
+  `MediaProjectionConfig.createConfigForDefaultDisplay()`: its default "A single app" would
+  limit playback capture to that one app. `media` captures `USAGE_MEDIA`; `system` captures `USAGE_MEDIA`,
   `USAGE_GAME` and `USAGE_UNKNOWN`. Android does not allow capturing any other usage
   (notifications, alarms, voice calls, assistant...). Apps can opt out of capture
   (`allowAudioPlaybackCapture="false"`, and apps targeting API < 29 are opted out by default);
   their audio is silence in the stream. On Android 9 and older these sources are not reported.
+- Playback capture only applies to players that start after the capture began. Audio that was
+  already playing when the stream started stays on the phone and the stream carries silence
+  until the app recreates its player (for example when the user starts the next track). Some
+  apps, such as YouTube Music, also stop playback when the capture consent dialog opens. The
+  user therefore has to start or restart playback after starting the stream. Verified on an
+  Android 15 emulator: a tone started before the stream arrived as silence, the same tone
+  started after it arrived at full level.
 - `microphone`: `AudioRecord` with `MediaRecorder.AudioSource.MIC`, runtime permission
   `RECORD_AUDIO`, foreground service type `microphone`, mono.
 - `call`: cellular call audio cannot be captured by third-party apps (`VOICE_CALL`,
   `VOICE_DOWNLINK`, `VOICE_UPLINK` require the privileged `CAPTURE_AUDIO_OUTPUT` permission).
   `call` therefore records `VOICE_COMMUNICATION` (the local microphone with echo cancellation)
   and the start packet says `callAudio:"local_microphone_only"`. The remote party's voice is never
-  included. While a cellular call is active many devices give the microphone to the modem and
-  third-party apps receive silence; this cannot be detected reliably.
+  included. While a cellular call is active, Android's concurrent capture policy gives the
+  microphone to the call and ordinary apps receive silence (only accessibility services and
+  privileged system apps are exempt). The sender checks
+  `AudioRecordingConfiguration.isClientSilenced()` twice a second (API 29+) and, after 2 s of
+  continuous silencing, ends the stream with `error: "silenced"`; the desktop then tells the
+  user why there is no call audio. On an Android 15 emulator the capture was silenced for the
+  whole call (`src:VOICE_COMMUNICATION silenced` in `dumpsys audio`).
 - Starting capture from a remote request: Android 10+ forbids starting activities, and Android
-  14+ forbids starting microphone/mediaProjection foreground services, from the background.
-  A remote request therefore posts a notification; the stream starts only after the user taps it
-  and grants the permission/consent. Dismissing or denying replies `permission_denied`; not
-  tapping within 60 s lets the requester time out.
+  14+ forbids starting microphone/mediaProjection foreground services, from the background
+  ("Foreground service started from background can not have ... microphone access"). A remote
+  request therefore posts a notification; the stream starts only after the user taps it and
+  grants the permission/consent. Dismissing or denying replies `permission_denied`; not tapping
+  within 60 s lets the requester time out. This also applies to the pre-approved call audio
+  above: the approval removes the question, but on Android 14+ the capture still needs one tap
+  on the notification to start.
 - Playback: `AudioTrack` (`USAGE_MEDIA`). Incoming streams play inside a foreground service of
   type `mediaPlayback`. If Android refuses to start a foreground service at that moment
   (Android 12+ background start restrictions), playback still runs in the app process, which is

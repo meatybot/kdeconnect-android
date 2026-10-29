@@ -21,6 +21,8 @@ import androidx.annotation.RequiresPermission
 import org.kde.kdeconnect.plugins.audiostream.AudioStreamProtocol.StreamFormat
 
 private const val LOG_TAG = "AudioStream"
+private const val SILENCE_CHECK_INTERVAL_MS = 500L
+private const val SILENCED_GIVE_UP_MS = 2000L
 
 object AudioRecordFactory {
     /**
@@ -79,6 +81,8 @@ class AudioCaptureThread(
     private val queue: FrameQueue,
     private val projection: MediaProjection?,
     private val onError: () -> Unit,
+    /** Android mutes our capture (another app or a phone call has the microphone) */
+    private val onSilenced: () -> Unit = {},
 ) {
     @Volatile
     private var running = false
@@ -88,6 +92,10 @@ class AudioCaptureThread(
         running = true
         thread = Thread({ run() }, "AudioStreamCapture").also { it.start() }
     }
+
+    /** Whether Android delivers silence instead of the input, e.g. during a cellular call */
+    private fun isSilenced(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && record.activeRecordingConfiguration?.isClientSilenced == true
 
     /** Does not wait: the thread releases the recorder after its current read (at most one frame) */
     fun stop() {
@@ -104,6 +112,8 @@ class AudioCaptureThread(
                 Log.w(LOG_TAG, "Recording did not start")
                 failed = true
             }
+            var silencedSinceMs = -1L
+            var nextCheckMs = 0L
             while (running && !failed) {
                 val pcm = ByteArray(frameBytes)
                 var read = 0
@@ -119,6 +129,21 @@ class AudioCaptureThread(
                 if (read == frameBytes) {
                     // read() returns once the last sample of the frame was recorded
                     queue.enqueue(SystemClock.elapsedRealtimeNanos() / 1000 - frameUs, pcm)
+                }
+                val nowMs = SystemClock.elapsedRealtime()
+                if (nowMs >= nextCheckMs) {
+                    nextCheckMs = nowMs + SILENCE_CHECK_INTERVAL_MS
+                    // Short silencing (a voice assistant, another recorder) is tolerated, a whole
+                    // phone call is not: the peer would only get silence
+                    if (!isSilenced()) {
+                        silencedSinceMs = -1L
+                    } else if (silencedSinceMs < 0) {
+                        silencedSinceMs = nowMs
+                    } else if (nowMs - silencedSinceMs >= SILENCED_GIVE_UP_MS && running) {
+                        Log.w(LOG_TAG, "Capture is silenced by the system, stopping")
+                        running = false
+                        onSilenced()
+                    }
                 }
             }
         } catch (e: IllegalStateException) {

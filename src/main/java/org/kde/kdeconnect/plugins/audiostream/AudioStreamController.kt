@@ -32,11 +32,18 @@ class AudioStreamController(private val env: Environment, val localCapabilities:
         fun send(np: NetworkPacket)
         /** A remote request needs the local user: answer with [consentGranted]/[consentDenied] */
         fun askConsent(streamId: String, source: String, format: StreamFormat)
+        /**
+         * A remote request that the user already approved (see [approveCallAudio]): start capturing
+         * without asking, and answer with [outgoingReady] or [captureFailed]
+         */
+        fun startApprovedCapture(streamId: String, source: String, format: StreamFormat)
         fun dismissConsent(streamId: String)
         /** Start playing an incoming stream; call [streamEnded] when it ends. Null if no output is available. */
         fun startPlayback(streamId: String, start: Message, payload: NetworkPacket.Payload): StreamHandle?
         fun schedule(delayMs: Long, action: () -> Unit): Cancellable
         fun sessionsChanged()
+        /** Monotonic milliseconds */
+        fun nowMs(): Long
     }
 
     enum class State {
@@ -63,6 +70,9 @@ class AudioStreamController(private val env: Environment, val localCapabilities:
 
     private val sessions = LinkedHashMap<String, Session>()
 
+    /** Expiry, in [Environment.nowMs] time, of the approval given by answering a call with audio on the peer */
+    private var callAudioApprovedUntilMs = 0L
+
     @Volatile
     var remoteCapabilities: Capabilities? = null
         private set
@@ -72,6 +82,20 @@ class AudioStreamController(private val env: Environment, val localCapabilities:
 
     @Synchronized
     fun hasSession(streamId: String): Boolean = sessions.containsKey(streamId)
+
+    /**
+     * The user answered a call from the peer and chose to hear it there. The peer's request for
+     * the call audio that follows needs no second confirmation on this device.
+     */
+    @Synchronized
+    fun approveCallAudio() {
+        callAudioApprovedUntilMs = env.nowMs() + CALL_AUDIO_APPROVAL_MS
+    }
+
+    @Synchronized
+    fun revokeCallAudioApproval() {
+        callAudioApprovedUntilMs = 0L
+    }
 
     fun onConnected() {
         env.send(AudioStreamProtocol.makeCapabilitiesRequest())
@@ -131,6 +155,19 @@ class AudioStreamController(private val env: Environment, val localCapabilities:
         if (s.sending && s.state == State.AWAITING_CONSENT) {
             endSession(streamId, AudioStreamProtocol.ERROR_PERMISSION_DENIED, notifyPeer = s.remotelyRequested)
         }
+    }
+
+    /**
+     * Android refused to start an approved capture from the background: the user has to tap
+     * once, so ask like for any other request
+     */
+    @Synchronized
+    fun approvedCaptureRefused(streamId: String) {
+        val s = sessions[streamId] ?: return
+        if (!s.sending || s.state != State.AWAITING_CONSENT) return
+        s.timeout?.cancel()
+        s.timeout = env.schedule(CONSENT_TIMEOUT_MS) { endSession(streamId, AudioStreamProtocol.ERROR_PERMISSION_DENIED, notifyPeer = true) }
+        env.askConsent(streamId, s.source, s.format)
     }
 
     /**
@@ -304,6 +341,14 @@ class AudioStreamController(private val env: Environment, val localCapabilities:
         }
         val session = Session(m.source, sending = true, state = State.AWAITING_CONSENT, format = decision.format, remotelyRequested = true)
         sessions[m.streamId] = session
+        // Used once: a later call needs a new answer from the user
+        if (m.source == AudioStreamProtocol.SOURCE_CALL && env.nowMs() < callAudioApprovedUntilMs) {
+            callAudioApprovedUntilMs = 0L
+            session.timeout = env.schedule(CONSENT_TIMEOUT_MS) { endSession(m.streamId, AudioStreamProtocol.ERROR_CAPTURE_FAILED, notifyPeer = true) }
+            env.startApprovedCapture(m.streamId, m.source, decision.format)
+            env.sessionsChanged()
+            return
+        }
         // Android needs a tap from the user before it lets us capture anything
         session.timeout = env.schedule(CONSENT_TIMEOUT_MS) { endSession(m.streamId, AudioStreamProtocol.ERROR_PERMISSION_DENIED, notifyPeer = true) }
         env.askConsent(m.streamId, m.source, decision.format)
@@ -317,11 +362,13 @@ class AudioStreamController(private val env: Environment, val localCapabilities:
         if (s.state == State.AWAITING_CONSENT) {
             env.dismissConsent(streamId)
         }
-        s.handle?.stop()
         if (notifyPeer) {
+            // Before stopping the stream: its last frame ends the session on the receiver, which
+            // would then ignore a stop that carries the reason
             val type = if (s.sending) AudioStreamProtocol.PACKET_TYPE_AUDIOSTREAM else AudioStreamProtocol.PACKET_TYPE_AUDIOSTREAM_REQUEST
             env.send(AudioStreamProtocol.makeStopPacket(type, streamId, s.source, error))
         }
+        s.handle?.stop()
         env.sessionsChanged()
     }
 
@@ -329,5 +376,7 @@ class AudioStreamController(private val env: Environment, val localCapabilities:
         /** The peer may have to wait for its user to accept a consent dialog */
         const val REQUEST_TIMEOUT_MS = 60_000L
         const val CONSENT_TIMEOUT_MS = 60_000L
+        /** How long after answering a call the peer's request for the call audio is accepted without asking */
+        const val CALL_AUDIO_APPROVAL_MS = 30_000L
     }
 }

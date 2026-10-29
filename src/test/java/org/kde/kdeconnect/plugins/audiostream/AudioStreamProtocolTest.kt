@@ -145,6 +145,8 @@ class AudioStreamProtocolTest {
         val stoppedHandles = mutableListOf<String>()
         var playbackAvailable = true
         val playing = mutableListOf<String>()
+        val approvedCaptures = mutableListOf<String>()
+        var now = 1_000L
 
         override fun send(np: NetworkPacket) {
             sent.add(np)
@@ -152,6 +154,10 @@ class AudioStreamProtocolTest {
         override fun askConsent(streamId: String, source: String, format: StreamFormat) {
             consents.add(streamId)
         }
+        override fun startApprovedCapture(streamId: String, source: String, format: StreamFormat) {
+            approvedCaptures.add(streamId)
+        }
+        override fun nowMs(): Long = now
         override fun dismissConsent(streamId: String) {
             dismissed.add(streamId)
         }
@@ -218,6 +224,80 @@ class AudioStreamProtocolTest {
         assertTrue(controller.sessions().isEmpty())
         // A late grant for a stream that is gone does nothing
         assertFalse(controller.consentGranted("r1"))
+    }
+
+    @Test
+    fun callAudioAfterRemoteAnswerSkipsConsentOnce() {
+        val env = FakeEnv()
+        val controller = AudioStreamController(env, allSources)
+        controller.approveCallAudio()
+
+        // Only the call source is covered by answering the call
+        controller.onPacketReceived(AudioStreamProtocol.makeStartRequest("mic", AudioStreamProtocol.SOURCE_MICROPHONE, StreamFormat()))
+        assertEquals(listOf("mic"), env.consents)
+        assertTrue(env.approvedCaptures.isEmpty())
+
+        controller.onPacketReceived(AudioStreamProtocol.makeStartRequest("call-1", AudioStreamProtocol.SOURCE_CALL, StreamFormat()))
+        assertEquals(listOf("call-1"), env.approvedCaptures)
+        assertEquals(listOf("mic"), env.consents)
+        assertEquals(AudioStreamController.State.AWAITING_CONSENT, controller.sessions().first { it.streamId == "call-1" }.state)
+        assertTrue(controller.consentGranted("call-1"))
+        assertTrue(controller.outgoingReady("call-1", StreamFormat(channels = 1), null, FrameQueue(1 shl 16)) {})
+        assertEquals(AudioStreamProtocol.ACTION_START, env.last().action)
+
+        // The approval is used up: the next call request asks again
+        controller.onPacketReceived(AudioStreamProtocol.makeStartRequest("call-2", AudioStreamProtocol.SOURCE_CALL, StreamFormat()))
+        assertEquals(listOf("mic", "call-2"), env.consents)
+        assertEquals(listOf("call-1"), env.approvedCaptures)
+    }
+
+    @Test
+    fun callAudioApprovalExpiresAndCanFallBackToConsent() {
+        val env = FakeEnv()
+        val controller = AudioStreamController(env, allSources)
+        controller.approveCallAudio()
+        env.now += AudioStreamController.CALL_AUDIO_APPROVAL_MS
+        controller.onPacketReceived(AudioStreamProtocol.makeStartRequest("late", AudioStreamProtocol.SOURCE_CALL, StreamFormat()))
+        assertEquals(listOf("late"), env.consents)
+        assertTrue(env.approvedCaptures.isEmpty())
+
+        // Hanging up revokes it
+        controller.approveCallAudio()
+        controller.revokeCallAudioApproval()
+        controller.onPacketReceived(AudioStreamProtocol.makeStartRequest("after-hangup", AudioStreamProtocol.SOURCE_CALL, StreamFormat()))
+        assertEquals(listOf("late", "after-hangup"), env.consents)
+
+        // Android refuses to start the approved capture from the background: the user is asked instead
+        val fresh = FakeEnv()
+        val c2 = AudioStreamController(fresh, allSources)
+        c2.approveCallAudio()
+        c2.onPacketReceived(AudioStreamProtocol.makeStartRequest("bg", AudioStreamProtocol.SOURCE_CALL, StreamFormat()))
+        assertEquals(listOf("bg"), fresh.approvedCaptures)
+        c2.approvedCaptureRefused("bg")
+        assertEquals(listOf("bg"), fresh.consents)
+        assertEquals(1, fresh.timers.size)
+        fresh.timers.single().second()
+        assertEquals(AudioStreamProtocol.ERROR_PERMISSION_DENIED, fresh.last().error)
+        assertTrue(c2.sessions().isEmpty())
+    }
+
+    @Test
+    fun silencedCaptureTellsThePeer() {
+        val env = FakeEnv()
+        val controller = AudioStreamController(env, allSources)
+        controller.approveCallAudio()
+        controller.onPacketReceived(AudioStreamProtocol.makeStartRequest("call-1", AudioStreamProtocol.SOURCE_CALL, StreamFormat()))
+        assertTrue(controller.consentGranted("call-1"))
+        var released = false
+        assertTrue(controller.outgoingReady("call-1", StreamFormat(channels = 1), null, FrameQueue(1 shl 16)) { released = true })
+
+        // Android mutes the microphone for the whole call
+        controller.captureFailed("call-1", AudioStreamProtocol.ERROR_SILENCED)
+        assertTrue(released)
+        assertEquals(AudioStreamProtocol.PACKET_TYPE_AUDIOSTREAM, env.sent.last().type)
+        assertEquals(AudioStreamProtocol.ACTION_STOP, env.last().action)
+        assertEquals(AudioStreamProtocol.ERROR_SILENCED, env.last().error)
+        assertTrue(controller.sessions().isEmpty())
     }
 
     @Test

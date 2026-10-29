@@ -51,6 +51,9 @@ class AudioStreamService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Started with startForegroundService(): Android kills the app unless startForeground() follows,
+        // even when it turns out there is nothing to do
+        enterForeground(0)
         if (intent?.action == ACTION_CAPTURE) {
             startCapture(intent)
         } else {
@@ -60,12 +63,16 @@ class AudioStreamService : Service() {
     }
 
     private fun startCapture(intent: Intent) {
+        startCaptureFor(intent)
+        update()
+    }
+
+    private fun startCaptureFor(intent: Intent) {
         val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
         val streamId = intent.getStringExtra(EXTRA_STREAM_ID)
         val plugin = KdeConnect.getInstance().getDevicePlugin<AudioStreamPlugin>(deviceId)
         val pending = if (streamId != null) plugin?.controller?.pendingOutgoing(streamId) else null
         if (plugin == null || streamId == null || pending == null) {
-            update()
             return
         }
         val (source, format) = pending
@@ -79,8 +86,12 @@ class AudioStreamService : Service() {
         }
         // Android 14 requires being in the foreground with the capture type before getMediaProjection()
         if (!enterForeground(captureType)) {
-            plugin.controller.captureFailed(streamId, AudioStreamProtocol.ERROR_PERMISSION_DENIED)
-            update()
+            if (intent.getBooleanExtra(EXTRA_APPROVED, false)) {
+                // Started from the background without a while-in-use exemption: ask the user instead
+                plugin.controller.approvedCaptureRefused(streamId)
+            } else {
+                plugin.controller.captureFailed(streamId, AudioStreamProtocol.ERROR_PERMISSION_DENIED)
+            }
             return
         }
 
@@ -109,7 +120,6 @@ class AudioStreamService : Service() {
                 if (e is SecurityException) AudioStreamProtocol.ERROR_PERMISSION_DENIED else AudioStreamProtocol.ERROR_CAPTURE_FAILED,
             )
         }
-        update()
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
@@ -119,9 +129,11 @@ class AudioStreamService : Service() {
         val queueBytes = bytesPerMs * SENDER_QUEUE_MS + FrameCodec.HEADER_SIZE * (SENDER_QUEUE_MS / format.frameDurationMs + 1)
         // Closed by the link when the receiver goes away or once the last frame was sent
         val queue = FrameQueue(queueBytes) { plugin.controller.streamEnded(streamId) }
-        val capture = AudioCaptureThread(record, format, queue, projection) {
-            plugin.controller.captureFailed(streamId, AudioStreamProtocol.ERROR_CAPTURE_FAILED)
-        }
+        val capture = AudioCaptureThread(
+            record, format, queue, projection,
+            onError = { plugin.controller.captureFailed(streamId, AudioStreamProtocol.ERROR_CAPTURE_FAILED) },
+            onSilenced = { plugin.controller.captureFailed(streamId, AudioStreamProtocol.ERROR_SILENCED) },
+        )
         val callAudio = if (source == AudioStreamProtocol.SOURCE_CALL) AudioStreamProtocol.CALL_AUDIO_LOCAL_MICROPHONE_ONLY else null
         val handle = AudioStreamController.StreamHandle {
             capture.stop()
@@ -184,6 +196,7 @@ class AudioStreamService : Service() {
         private const val EXTRA_STREAM_ID = "streamId"
         private const val EXTRA_PROJECTION_RESULT = "projectionResult"
         private const val EXTRA_PROJECTION_DATA = "projectionData"
+        private const val EXTRA_APPROVED = "approved"
 
         @Volatile
         private var instance: AudioStreamService? = null
@@ -199,6 +212,27 @@ class AudioStreamService : Service() {
                 putExtra(EXTRA_PROJECTION_DATA, projectionData)
             }
             ContextCompat.startForegroundService(context, intent)
+        }
+
+        /**
+         * Starts capturing a stream the user already approved (call audio after answering from the
+         * peer), without an activity. Android only allows this right after the user interacted with
+         * one of our notifications; otherwise the controller falls back to asking for consent.
+         */
+        fun startApprovedCapture(context: Context, deviceId: String, streamId: String) {
+            val intent = Intent(context, AudioStreamService::class.java).apply {
+                action = ACTION_CAPTURE
+                putExtra(EXTRA_DEVICE_ID, deviceId)
+                putExtra(EXTRA_STREAM_ID, streamId)
+                putExtra(EXTRA_APPROVED, true)
+            }
+            try {
+                ContextCompat.startForegroundService(context.applicationContext, intent)
+            } catch (e: Exception) {
+                // ForegroundServiceStartNotAllowedException: nothing exempts us right now
+                Log.w(LOG_TAG, "Could not start capturing without the user", e)
+                KdeConnect.getInstance().getDevicePlugin<AudioStreamPlugin>(deviceId)?.controller?.approvedCaptureRefused(streamId)
+            }
         }
 
         /** The set of streams changed */

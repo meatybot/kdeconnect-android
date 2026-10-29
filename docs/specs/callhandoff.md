@@ -190,7 +190,9 @@ stateDiagram-v2
 - `phoneNumber` is never used to place calls; it is only used to choose between existing calls
   and is echoed back. Unknown `action` values are rejected with `invalid_action`.
 - Remote audio is never started implicitly: it requires an explicit `answer` with
-  `audioRoute: "remote"`, and the audiostream plugin applies its own permission checks.
+  `audioRoute: "remote"`. That answer approves the single `call` audio request that follows
+  within 30 s, so the phone does not ask a second time; any other audio request still needs the
+  audiostream plugin's own consent (see `audiostream.md`).
 - Emergency calls cannot be ended through `TelecomManager.endCall()` (enforced by Android).
 
 ## Platform limitations
@@ -213,10 +215,16 @@ Android:
   `CAPTURE_AUDIO_OUTPUT` permission), nor to inject audio into the uplink. For `remote` the phone
   therefore answers with the speaker enabled, and the audiostream plugin on Android serves the
   `call` source from the local microphone only (`callAudio: "local_microphone_only"`); while a
-  cellular call is active many devices feed silence to non-privileged recorders. In practice
-  `remote` on Android is a best-effort acoustic pickup of the phone speaker, may not carry the
-  remote party's voice, and never carries the desktop user's voice into the call. A full audio
+  cellular call is active Android's concurrent capture policy gives the microphone to the call
+  and ordinary apps receive silence, so on most phones `remote` delivers no audio at all. The
+  phone detects this and ends the stream with `error: "silenced"`, and the desktop shows why.
+  Where the microphone is not silenced, `remote` is a best-effort acoustic pickup of the phone
+  speaker; it never carries the desktop user's voice into the call. The labels say so ("Answer
+  on Speaker, Try Audio Here" on the desktop, "Answer, try audio here" on Android). A full audio
   handoff needs a Bluetooth HFP connection instead.
+- Starting the call capture: Android 14+ does not let an app start using the microphone from the
+  background, so after a remote answer the phone still shows one notification that has to be
+  tapped to start the stream.
 - Notifications for desktop modem calls need `POST_NOTIFICATIONS` on Android 13+; without it
   they are not shown (the actions are still available from nowhere else).
 
@@ -236,8 +244,8 @@ Desktop:
 
 Desktop (`kdeconnect_telephony`):
 
-- Ringing notification (`callReceived` event): Answer, Answer on speaker, Answer with audio
-  here (only if the peer advertises audiostream), Reject, Mute Call. Old peers: only Mute Call.
+- Ringing notification (`callReceived` event): Answer, Answer on Speaker, Answer on Speaker, Try
+  Audio Here (only if the peer advertises audiostream), Reject, Mute Call. Old peers: only Mute Call.
 - Talking notification (persistent, same event): "Call in progress with X" + Hang up.
 - Failures (`action_status` with `success: false`): error notification with a readable reason.
 - DBus (`org.kde.kdeconnect.device.telephony`): `bool answerCall(QString audioRoute)`,
@@ -252,8 +260,8 @@ Android (`TelephonyPlugin`):
 - Optional permission `ANSWER_PHONE_CALLS` (API 26+) requested through the plugin settings
   dialog.
 - For desktop modem calls: high priority notification "Incoming call on <device>" with
-  Answer (audio stays on the desktop), Answer here (`remote`, only if the desktop advertises
-  audiostream) and Reject; while talking: "Call in progress on <device>" with Hang up.
+  Answer (audio stays on the desktop), Answer, try audio here (`remote`, only if the desktop
+  advertises audiostream) and Reject; while talking: "Call in progress on <device>" with Hang up.
   Failures are shown as a notification.
 
 ## Test plan

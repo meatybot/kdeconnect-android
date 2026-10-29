@@ -28,6 +28,7 @@ import org.kde.kdeconnect.helpers.NotificationHelper
 import org.kde.kdeconnect.plugins.Plugin
 import org.kde.kdeconnect.plugins.PluginFactory.LoadablePlugin
 import org.kde.kdeconnect.ui.PluginSettingsFragment
+import org.kde.kdeconnect.plugins.audiostream.AudioStreamPlugin
 import org.kde.kdeconnect_tp.R
 import java.util.Timer
 import java.util.TimerTask
@@ -119,6 +120,7 @@ class TelephonyPlugin : Plugin() {
                 device.sendPacket(np)
             }
             TelephonyManager.CALL_STATE_IDLE -> {
+                device.getPlugin(AudioStreamPlugin::class.java)?.controller?.revokeCallAudioApproval()
                 if (speakerSetForCall) {
                     callController?.setSpeakerphone(false)
                     speakerSetForCall = false
@@ -200,10 +202,15 @@ class TelephonyPlugin : Plugin() {
 
     private fun handleRequestAction(np: NetworkPacket) {
         val request = CallHandoff.parseRequest(np)
-        val canStreamCallAudio = device.getPlugin(AUDIOSTREAM_PLUGIN_KEY) != null
+        val audioStream = device.getPlugin(AudioStreamPlugin::class.java)
+        val canStreamCallAudio = audioStream != null
         val result = CallHandoff.execute(request, callController!!, canStreamCallAudio)
         if (result.audioRoute == CallHandoff.AudioRoute.SPEAKER || result.audioRoute == CallHandoff.AudioRoute.REMOTE) {
             speakerSetForCall = true
+        }
+        if (result.audioRoute == CallHandoff.AudioRoute.REMOTE) {
+            // Answering with the audio on the peer is the user's consent for the call stream it requests next
+            audioStream?.controller?.approveCallAudio()
         }
         device.sendPacket(CallHandoff.statusPacket(request, result))
     }
@@ -358,7 +365,5 @@ class TelephonyPlugin : Plugin() {
         private const val PACKET_TYPE_TELEPHONY_REQUEST_MUTE = "kdeconnect.telephony.request_mute"
 
         private const val KEY_PREF_BLOCKED_NUMBERS = "telephony_blocked_numbers"
-
-        private const val AUDIOSTREAM_PLUGIN_KEY = "AudioStreamPlugin"
     }
 }

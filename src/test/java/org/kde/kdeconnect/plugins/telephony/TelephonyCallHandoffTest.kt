@@ -28,7 +28,9 @@ import org.kde.kdeconnect.Device
 import org.kde.kdeconnect.DeviceInfo
 import org.kde.kdeconnect.DeviceType
 import org.kde.kdeconnect.NetworkPacket
-import org.kde.kdeconnect.plugins.Plugin
+import org.kde.kdeconnect.plugins.audiostream.AudioStreamController
+import org.kde.kdeconnect.plugins.audiostream.AudioStreamPlugin
+import org.kde.kdeconnect.plugins.audiostream.AudioStreamProtocol
 import org.kde.kdeconnect.plugins.telephony.CallHandoff.Action
 import org.kde.kdeconnect.plugins.telephony.CallHandoff.AudioRoute
 import org.kde.kdeconnect_tp.R
@@ -74,6 +76,26 @@ class TelephonyCallHandoffTest {
     private val peerIncoming = mutableSetOf<String>()
     private var peerHasAudioStreamPlugin = false
 
+    private class AudioEnv : AudioStreamController.Environment {
+        val consents = mutableListOf<String>()
+        val approved = mutableListOf<String>()
+        override fun send(np: NetworkPacket) {}
+        override fun askConsent(streamId: String, source: String, format: AudioStreamProtocol.StreamFormat) {
+            consents += streamId
+        }
+        override fun startApprovedCapture(streamId: String, source: String, format: AudioStreamProtocol.StreamFormat) {
+            approved += streamId
+        }
+        override fun dismissConsent(streamId: String) {}
+        override fun startPlayback(streamId: String, start: AudioStreamProtocol.Message, payload: NetworkPacket.Payload): AudioStreamController.StreamHandle? = null
+        override fun schedule(delayMs: Long, action: () -> Unit) = AudioStreamController.Cancellable {}
+        override fun sessionsChanged() {}
+        override fun nowMs(): Long = 0
+    }
+
+    private val audioEnv = AudioEnv()
+    private val audioController = AudioStreamController(audioEnv, AudioStreamProtocol.Capabilities(AudioStreamProtocol.ALL_SOURCES))
+
     private fun request(action: String, phoneNumber: String? = null, audioRoute: String? = null): NetworkPacket {
         val np = NetworkPacket(CallHandoff.PACKET_TYPE_TELEPHONY_REQUEST_ACTION)
         np["action"] = action
@@ -87,13 +109,15 @@ class TelephonyCallHandoffTest {
 
     private fun makePlugin(controller: CallController): TelephonyPlugin {
         val info = DeviceInfo("peer_id", mockk(relaxed = true), "Desktop", DeviceType.DESKTOP, 8, peerIncoming, emptySet())
-        val audioPlugin = mockk<Plugin>()
+        val audioPlugin = mockk<AudioStreamPlugin> {
+            every { this@mockk.controller } returns audioController
+        }
         val device = mockk<Device> {
             every { sendPacket(any()) } answers { sent += NetworkPacket.unserialize(arg<NetworkPacket>(0).serialize()) }
             every { deviceInfo } returns info
             every { deviceId } returns "peer_id"
             every { name } returns "Desktop"
-            every { getPlugin("AudioStreamPlugin") } answers { if (peerHasAudioStreamPlugin) audioPlugin else null }
+            every { getPlugin(AudioStreamPlugin::class.java) } answers { if (peerHasAudioStreamPlugin) audioPlugin else null }
         }
         return TelephonyPlugin().apply {
             setContext(context, device)
@@ -254,6 +278,11 @@ class TelephonyCallHandoffTest {
         assertEquals("remote", status.getString("audioRoute"))
         assertEquals("+15550100", status.getString("phoneNumber"))
         assertFalse(status.has("error"))
+
+        // Answering with the audio on the desktop is the consent for the call stream it requests next
+        audioController.onPacketReceived(AudioStreamProtocol.makeStartRequest("call-x", AudioStreamProtocol.SOURCE_CALL, AudioStreamProtocol.StreamFormat()))
+        assertEquals(listOf("call-x"), audioEnv.approved)
+        assertTrue(audioEnv.consents.isEmpty())
     }
 
     @Test

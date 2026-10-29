@@ -9,6 +9,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -65,7 +66,14 @@ class AudioStreamConsentActivity : AppCompatActivity() {
         val needsProjection = source == AudioStreamProtocol.SOURCE_MEDIA || source == AudioStreamProtocol.SOURCE_SYSTEM
         if (needsProjection && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val manager = getSystemService<MediaProjectionManager>() ?: return deny()
-            projectionConsent.launch(manager.createScreenCaptureIntent())
+            // Playback capture follows what the projection covers: with "A single app" (the default
+            // since Android 14) only that app would be heard, so ask for the whole display
+            val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+            } else {
+                manager.createScreenCaptureIntent()
+            }
+            projectionConsent.launch(captureIntent)
         } else if (needsProjection) {
             deny()
         } else {
